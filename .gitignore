@@ -6,3 +6,5 @@ __pycache__/
 *.pyc
 attachments/*.pdf
 data/sent_log.csv
+data/recipients.csv
+recipients.csv

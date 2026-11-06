@@ -7,6 +7,8 @@ import time
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from pathlib import Path
+from google.auth.exceptions import RefreshError
+from googleapiclient.errors import HttpError
 
 from dotenv import load_dotenv
 from email_validator import validate_email, EmailNotValidError
@@ -26,16 +28,30 @@ CSV_FILE = ROOT / os.getenv("RECIPIENTS_CSV", "data/recipients.csv")
 TEMPLATE_FILE = ROOT / os.getenv("EMAIL_TEMPLATE", "email_template.txt")
 MAX_RECIPIENTS = int(os.getenv("MAX_RECIPIENTS", "10"))
 DELAY = int(os.getenv("SEND_DELAY_SECONDS", "12"))
+if not 1 <= MAX_RECIPIENTS <= 20:
+    raise ValueError("MAX_RECIPIENTS must be between 1 and 20.")
+if DELAY < 0:
+    raise ValueError("SEND_DELAY_SECONDS cannot be negative.")
 LOG_FILE = ROOT / "data" / "sent_log.csv"
 
 
 def gmail_service():
     credentials = None
     if TOKEN_FILE.exists():
-        credentials = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+        try:
+            credentials = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+        except (ValueError, KeyError) as error:
+            raise RuntimeError(f"OAuth token file is invalid: {TOKEN_FILE}. Remove it and run 'auth' again.") from error
 
     if credentials and credentials.expired and credentials.refresh_token:
-        credentials.refresh(Request())
+        try:
+            credentials.refresh(Request())
+            TOKEN_FILE.write_text(credentials.to_json(), encoding="utf-8")
+        except RefreshError as error:
+            raise RuntimeError(
+                "Google rejected the saved token. Delete token.json and run 'auth' again; "
+                "confirm this Google account is listed as an OAuth test user."
+            ) from error
 
     if not credentials or not credentials.valid:
         if not CREDS_FILE.exists():
@@ -45,6 +61,7 @@ def gmail_service():
             )
         flow = InstalledAppFlow.from_client_secrets_file(str(CREDS_FILE), SCOPES)
         credentials = flow.run_local_server(port=0)
+        TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
         TOKEN_FILE.write_text(credentials.to_json(), encoding="utf-8")
 
     return build("gmail", "v1", credentials=credentials)
@@ -62,6 +79,8 @@ def load_recipients():
 
     if not rows:
         raise ValueError("The recipients CSV is empty.")
+    if not {"company", "email"}.issubset(set(rows[0].keys())):
+        raise ValueError("The recipients CSV must contain company and email columns (name is optional).")
     if len(rows) > MAX_RECIPIENTS:
         raise ValueError(f"This run is limited to {MAX_RECIPIENTS} recipients. Split the list into batches.")
 
@@ -88,7 +107,10 @@ def load_recipients():
 def load_template():
     if not TEMPLATE_FILE.exists():
         raise FileNotFoundError(f"Email template not found: {TEMPLATE_FILE}")
-    return TEMPLATE_FILE.read_text(encoding="utf-8").strip()
+    template = TEMPLATE_FILE.read_text(encoding="utf-8").strip()
+    if not template or "{company}" not in template:
+        raise ValueError("Email template must be non-empty and contain the {company} placeholder.")
+    return template
 
 
 def load_sent_keys():
@@ -99,6 +121,17 @@ def load_sent_keys():
             (r["company"].casefold(), r["email"].casefold())
             for r in csv.DictReader(file)
             if r.get("status") == "sent"
+        }
+
+
+def load_attempted_keys():
+    if not LOG_FILE.exists():
+        return set()
+    with LOG_FILE.open("r", encoding="utf-8", newline="") as file:
+        return {
+            (r["company"].casefold(), r["email"].casefold())
+            for r in csv.DictReader(file)
+            if r.get("status") in {"failed", "uncertain"}
         }
 
 
@@ -141,9 +174,18 @@ def make_message(recipient, template):
         CV_FILE.read_bytes(),
         maintype="application",
         subtype="pdf",
-        filename="CV.pdf",
+        filename=CV_FILE.name,
     )
     return message
+
+
+def validate_attachment():
+    if not CV_FILE.is_file():
+        raise FileNotFoundError(f"CV PDF not found: {CV_FILE}")
+    if CV_FILE.suffix.lower() != ".pdf":
+        raise ValueError("CV attachment must be a PDF file.")
+    if CV_FILE.stat().st_size == 0 or CV_FILE.read_bytes()[:5] != b"%PDF-":
+        raise ValueError(f"CV attachment does not look like a valid PDF: {CV_FILE}")
 
 
 def preview():
@@ -156,22 +198,33 @@ def preview():
         marker = "ALREADY SENT - WILL SKIP" if (item["company"].casefold(), item["email"].casefold()) in sent else "READY"
         print(f"- {item['company']} | {item['email']} | {marker}")
 
-    first = next((r for r in recipients if (r["company"].casefold(), r["email"].casefold()) not in sent), recipients[0])
-    print("\n--- EMAIL PREVIEW ---")
-    print("To:", first["email"])
-    print("Subject:", f"Application for Network Systems Internship - {first['company']}")
-    print(render_body(template, first))
-    print(f"\nAttachment: {CV_FILE}")
+    validate_attachment()
+    for item in recipients:
+        if (item["company"].casefold(), item["email"].casefold()) in sent:
+            continue
+        message = make_message(item, template)
+        print(f"\n--- EMAIL PREVIEW: {item['company']} ---")
+        print("To:", item["email"])
+        print("Subject:", message["Subject"])
+        print(message.get_body().get_content())
+        print(f"Attachment: {CV_FILE.name} ({CV_FILE.stat().st_size} bytes)")
     print("\nNo email has been sent.")
 
 
 def send():
     recipients = load_recipients()
     template = load_template()
-    if not CV_FILE.exists():
-        raise FileNotFoundError(f"Put your CV PDF at: {CV_FILE}")
+    validate_attachment()
 
     sent_keys = load_sent_keys()
+    attempted_keys = load_attempted_keys()
+    for recipient in recipients:
+        key = (recipient["company"].casefold(), recipient["email"].casefold())
+        if key in attempted_keys and key not in sent_keys:
+            raise ValueError(
+                f"Previous send attempt for {recipient['company']} / {recipient['email']} was not confirmed "
+                "successful. Check Gmail Sent and data/sent_log.csv, then resolve that record manually before retrying."
+            )
     ready = [
         r for r in recipients
         if (r["company"].casefold(), r["email"].casefold()) not in sent_keys
@@ -203,8 +256,10 @@ def send():
             log_result(recipient, "sent", result.get("id", ""))
             print(f"SENT: {recipient['company']} ({recipient['email']})")
         except Exception as error:
-            log_result(recipient, "failed", error=str(error))
-            print(f"FAILED: {recipient['company']} ({recipient['email']}): {error}")
+            # A network failure can happen after Gmail accepted a message. Do not
+            # mark it retry-safe: the operator must inspect Gmail Sent first.
+            log_result(recipient, "uncertain", error=str(error))
+            print(f"STOPPED: {recipient['company']} ({recipient['email']}): {error}")
             print("Stopping now. Check Gmail Sent and the log before trying again.")
             break
 
@@ -214,18 +269,41 @@ def send():
     print("\nFinished. Check data/sent_log.csv and your Gmail Sent folder.")
 
 
+def dry_run():
+    recipients = load_recipients()
+    template = load_template()
+    validate_attachment()
+    sent = load_sent_keys()
+    pending = [r for r in recipients if (r["company"].casefold(), r["email"].casefold()) not in sent]
+    for recipient in pending:
+        message = make_message(recipient, template)
+        attachment = next(part for part in message.iter_attachments())
+        if attachment.get_content_type() != "application/pdf" or attachment.get_filename() != CV_FILE.name:
+            raise ValueError("Attachment validation failed.")
+        if "{company}" in message.get_body().get_content():
+            raise ValueError("Unexpanded {company} placeholder remains in message.")
+        print(f"DRY RUN OK: {recipient['company']} -> {recipient['email']} | {attachment.get_filename()}")
+    print(f"Dry run complete: {len(pending)} message(s) validated; no email sent.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Send a fixed internship application email to a small Gmail batch.")
-    parser.add_argument("command", choices=["auth", "preview", "send"])
+    parser.add_argument("command", choices=["auth", "preview", "dry-run", "send"])
     args = parser.parse_args()
 
-    if args.command == "auth":
-        gmail_service()
-        print("Gmail OAuth authentication completed.")
-    elif args.command == "preview":
-        preview()
-    elif args.command == "send":
-        send()
+    try:
+        if args.command == "auth":
+            gmail_service()
+            print("Gmail OAuth authentication completed.")
+        elif args.command == "preview":
+            preview()
+        elif args.command == "dry-run":
+            dry_run()
+        elif args.command == "send":
+            send()
+    except (FileNotFoundError, ValueError, RuntimeError, HttpError, OSError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

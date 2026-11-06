@@ -1,14 +1,17 @@
-Dear {name},
+Dear Hiring Team,
 
-I am writing to express my interest in an internship opportunity at {company} in the area of Network Systems / IT Infrastructure.
+I am writing to express my interest in an internship opportunity at {company}, particularly in the areas of Network Engineering, Network Administration, IT Infrastructure, or IT Support.
 
-I am an undergraduate following the Bachelor of Information and Communication Technology (BICT) degree at the University of Kelaniya, with an interest in developing practical experience in networking, IT infrastructure, and related technical operations.
+My name is Samadhi Jayalath, and I am currently an undergraduate at the University of Kelaniya, pursuing a Bachelor of Information and Communication Technology (BICT), specializing in Network Systems, with a current GPA of 3.72/4.00.
 
-I would appreciate it if you would consider my application for any suitable internship opportunity within your organisation. I have attached my CV for your reference and would be grateful for the opportunity to discuss how I could contribute while learning from your team.
+I am currently seeking an internship as part of my university requirements. I would appreciate your consideration for any available internship or trainee opportunities within your organization. I am also open to related IT roles where I can contribute, learn, and develop my professional skills.
 
-Thank you for your time and consideration.
+Please find my CV attached for your consideration. Thank you for your time. I would welcome the opportunity to discuss my application further.
 
-Best regards,
-[Your Full Name]
-[Phone Number]
-[Email Address]
+Kind regards,
+Samadhi Jayalath
+Undergraduate – BICT (Network Systems)
+University of Kelaniya
+Mobile: [add your phone number]
+Email: [add your email address]
+LinkedIn: [add your LinkedIn URL, if applicable]

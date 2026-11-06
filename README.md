@@ -1,9 +1,9 @@
 # Gmail Internship Application Sender
 
-This version does **not** use AI. You write one fixed email, add up to 10 recipients to a CSV, attach one CV PDF, then run the sender.
+This version does **not** use AI. You write one fixed email, add up to 20 recipients to a CSV, attach one CV PDF, then run the sender.
 
 ## 1. Requirements
-- Windows + Python 3.11 or newer
+- Windows + Python 3.12
 - Gmail account
 - Google Cloud OAuth Desktop credentials for Gmail API
 - Your CV as a PDF
@@ -15,7 +15,7 @@ Open PowerShell in this folder:
 py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
@@ -23,15 +23,15 @@ Copy-Item .env.example .env
 1. Open https://console.cloud.google.com/
 2. Create/select a Google Cloud project.
 3. Enable **Gmail API**.
-4. Configure the OAuth consent screen / Google Auth Platform.
+4. Configure the OAuth consent screen / Google Auth Platform. Choose **External** for a personal Gmail account (if prompted), keep **Publishing status** as Testing while developing, and add the exact Google account you will authorize as a **Test user**.
 5. Create an OAuth Client ID and choose **Desktop app**.
 6. Download the JSON file and save it in this folder as `credentials.json`.
-7. Add your Google account as a test user if Google's consent-screen configuration requires it.
-8. Run `python sender.py auth` and sign in through the browser.
+7. If you get `Error 403: access_denied` saying only developer-approved testers can use the app, your signed-in account is not in the OAuth app's test-user list (or you signed into a different Google account). In Google Cloud Console, open Google Auth Platform → Audience → Test users, add the account, save, wait briefly for the change to propagate, then retry. Do not try to bypass Google's restriction.
+8. Run `python sender.py auth` and sign in with that same test account.
 
 Official Google guide: https://developers.google.com/workspace/gmail/api/quickstart/python
 
-The app requests only the Gmail `gmail.send` permission. Keep `credentials.json` and `token.json` private.
+The app requests only the Gmail `gmail.send` permission. Keep `credentials.json`, `token.json`, and `.env` private; they are excluded by `.gitignore`. The token may include a refresh token and should be treated like a password. If credentials or tokens are exposed, delete/revoke them in Google Account security and Google Cloud, then create fresh credentials and authenticate again. Gmail's `gmail.send` is a restricted scope; production deployment or broad use may require Google verification. This personal local app does not claim verified production status.
 
 ## 4. Add your CV
 Put your PDF here:
@@ -62,8 +62,16 @@ Use only verified, publicly listed recruitment contacts or addresses that have i
 ```powershell
 python sender.py preview
 ```
+Preview validates and shows every unsent recipient message and the CV filename. It does not connect to Gmail.
 
-## 8. Send
+## 8. Run local dry-run checks
+```powershell
+python -m unittest discover -s tests -v
+python sender.py dry-run
+```
+These commands do not send email. Dry-run checks the CSV, duplicate history, `{company}` replacement, and that the attached file is a PDF. The tests use a temporary mock PDF.
+
+## 9. Send
 ```powershell
 python sender.py send
 ```
@@ -74,11 +82,11 @@ The program shows the recipient list and asks you to type exactly:
 
 It then sends separate one-to-one emails, each with the same CV attachment. It does not expose the other recipients to each other.
 
-## 9. Prevent duplicate sending
+## 10. Prevent duplicate sending
 Successful sends are recorded in `data/sent_log.csv`. On later runs, the same company + email combination is skipped. Do not delete this file unless you intentionally want to reset the history.
 
 ## Important
-- The sender is capped at 10 recipients per run.
+- The sender defaults to a maximum of 20 recipients per run. Set `MAX_RECIPIENTS` in `.env` to a value from 1 to 20; values above 20 are rejected.
 - It waits 12 seconds between messages.
 - Gmail sending limits and anti-abuse checks still apply. Do not use this to evade limits or send unsolicited repeated messages.
 - If Gmail reports a quota, spam, or abuse warning, stop.
