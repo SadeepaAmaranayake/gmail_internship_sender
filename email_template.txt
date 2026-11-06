@@ -1,0 +1,14 @@
+Dear {name},
+
+I am writing to express my interest in an internship opportunity at {company} in the area of Network Systems / IT Infrastructure.
+
+I am an undergraduate following the Bachelor of Information and Communication Technology (BICT) degree at the University of Kelaniya, with an interest in developing practical experience in networking, IT infrastructure, and related technical operations.
+
+I would appreciate it if you would consider my application for any suitable internship opportunity within your organisation. I have attached my CV for your reference and would be grateful for the opportunity to discuss how I could contribute while learning from your team.
+
+Thank you for your time and consideration.
+
+Best regards,
+[Your Full Name]
+[Phone Number]
+[Email Address]
